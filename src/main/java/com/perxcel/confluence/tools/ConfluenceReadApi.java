@@ -80,7 +80,6 @@ public class ConfluenceReadApi {
     }
 
     public int getPageReadCounter() {
-        this.pagesRead.forEach(System.out::println);
         return this.pagesRead.size();
     }
 

@@ -11,7 +11,6 @@ import org.springframework.test.context.junit4.SpringRunner;
 
 import java.util.List;
 
-
 @RunWith(SpringRunner.class)
 @TestPropertySource(locations = "classpath:application-test.properties")
 public class ConfluenceDeleteUnusedAttachmentsTest {
@@ -53,9 +52,9 @@ public class ConfluenceDeleteUnusedAttachmentsTest {
 
         // Assert they are all attachment ids
         unusedAttachments.forEach(t -> Assert.assertTrue("Id is of an Attachment", t.startsWith("at")));
-        System.out.printf("Total %d Attachments to Delete", unusedAttachments.size());
+        System.out.printf("Total %d Attachments to Delete.\n\n", unusedAttachments.size());
         // Delete all unused attachments
-       // unusedAttachments.forEach(t -> delete(authToken, t));
+        unusedAttachments.forEach(t -> delete(authToken, t));
     }
 
     private void delete(String authToken, String id) {
