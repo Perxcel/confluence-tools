@@ -3,6 +3,8 @@
 See here for more details: http://gordondickens.com/wordpress/2013/03/27/sawing-through-the-java-loggers/ -->
 <configuration scan="true" scanPeriod="30 seconds">
 
+   <timestamp key="byDay" datePattern="yyyyMMdd'T'HHmmss"/>
+
     <contextListener class="ch.qos.logback.classic.jul.LevelChangePropagator">
         <resetJUL>true</resetJUL>
     </contextListener>
@@ -16,25 +18,44 @@ See here for more details: http://gordondickens.com/wordpress/2013/03/27/sawing-
         </encoder>
     </appender>
 
+   <appender name="file" class="ch.qos.logback.core.FileAppender">
+      <file> log-${byDay}.txt </file>
+      <append>true</append>
+      <encoder>
+         <pattern>%-4relative [%thread] %-5level %logger{35} - %msg%n</pattern>
+      </encoder>
+   </appender>
 
     <!-- 3rdparty Loggers -->
     <logger name="org.springframework.core">
-        <level value="info" />
+        <level value="ERROR" />
+        <appender-ref ref="console" />
+
     </logger>
 
     <logger name="org.springframework.beans">
-        <level value="info" />
+        <level value="ERROR" />
+        <appender-ref ref="console" />
     </logger>
 
     <logger name="org.springframework.context">
-        <level value="info" />
+        <level value="ERROR" />
+        <appender-ref ref="console" />
     </logger>
 
     <logger name="org.springframework.web">
-        <level value="info" />
+        <level value="ERROR" />
+        <appender-ref ref="console" />
     </logger>
 
-    <root level="info">
+    <!-- confluence-tools logger-->
+    <logger name="com.perxcel.confluence" additivity="false" >
+        <level value="info" />
+        <appender-ref ref="file" />
+    </logger>
+
+    <root level="info" >
         <appender-ref ref="console"/>
     </root>
+
 </configuration>

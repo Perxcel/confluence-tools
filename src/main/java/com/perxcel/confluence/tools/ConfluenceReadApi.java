@@ -1,31 +1,48 @@
 package com.perxcel.confluence.tools;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-public class ConfluenceReadApi {
+class ConfluenceReadApi {
 
-    private final String baseUrl;
+    private static final Logger LOGGER = LoggerFactory.getLogger(ConfluenceReadApi.class);
+
+    private final String contentUri = "/wiki/rest/api/content/{pageId}";
 
     private String expandParams = "?expand=space,body.storage,childTypes.attachment,childTypes.page&limit=999";
 
     private RestTemplate restTemplate;
 
-    private List<String> pagesRead = new ArrayList<>();
+    private Set<String> pagesRead = new LinkedHashSet<>();
+
+    private Map<String, List<String>> unusedAttachmentsMap = new HashMap<>();
+
+    private String url;
 
     ConfluenceReadApi(String baseUrl) {
-        this.baseUrl = baseUrl;
+        this.url = baseUrl + contentUri + expandParams;
         this.restTemplate = new RestTemplateBuilder().build();
     }
 
-    public PageResult getContent(String accessToken, String uri) {
-        String url = baseUrl + uri + expandParams;
+    List<String> getUnusedAttachments(String authToken, String pageId) {
+        PageResult content = this.getContent(authToken, pageId);
+
+        LOGGER.debug("Content Api Response Received for url: {}\n", pageId);
+        this.pagesRead.add(content.getTitle());
+
+        // Get the top child level page links
+        List<String> nextPages = this.getNextLinks(content);
+        LOGGER.debug("Result is a {} with title: {}, with next pages: {}\n", content.getType(), content.getTitle(), nextPages);
+        return getUnusedAttachmentIds(authToken, nextPages);
+    }
+
+    PageResult getContent(String accessToken, String pageId) {
 
         ResponseEntity<PageResult> responseEntity;
         try {
@@ -35,17 +52,16 @@ public class ConfluenceReadApi {
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
 
-            responseEntity = restTemplate.exchange(url, HttpMethod.GET, entity, PageResult.class);
-            this.pagesRead.add(url);
+            responseEntity = restTemplate.exchange(url, HttpMethod.GET, entity, PageResult.class, pageId);
 
             return responseEntity.getBody();
         } catch (HttpClientErrorException e) {
-            System.out.print("Error : \n" + e.getResponseBodyAsString());
+            LOGGER.error("Error : \n" + e.getResponseBodyAsString());
         }
         return null;
     }
 
-    public List<String> getNextLinks(PageResult content) {
+    List<String> getNextLinks(PageResult content) {
 
         List<String> links = new ArrayList<>();
         if (content.getType().equalsIgnoreCase("page")) {
@@ -71,7 +87,7 @@ public class ConfluenceReadApi {
         return links;
     }
 
-    public List<String> getUnusedAttachmentIds(String authToken, List<String> nextPages) {
+    List<String> getUnusedAttachmentIds(String authToken, List<String> nextPages) {
 
         List<String> unusedAttachments = new ArrayList<>();
         // Get content for each child page
@@ -79,9 +95,6 @@ public class ConfluenceReadApi {
         return unusedAttachments;
     }
 
-    public int getPageReadCounter() {
-        return this.pagesRead.size();
-    }
 
     private ContentApiResponse getChildPages(String accessToken, String urlWithoutExpand) {
         String url = urlWithoutExpand + expandParams;
@@ -93,10 +106,9 @@ public class ConfluenceReadApi {
 
             HttpEntity<String> entity = new HttpEntity<>(headers);
             responseEntity = restTemplate.exchange(url, HttpMethod.GET, entity, ContentApiResponse.class);
-            this.pagesRead.add(url);
             return responseEntity.getBody();
         } catch (HttpClientErrorException e) {
-            System.out.print("Error : \n" + e.getResponseBodyAsString());
+            LOGGER.error("Error : \n" + e.getResponseBodyAsString());
         }
         return null;
     }
@@ -118,15 +130,24 @@ public class ConfluenceReadApi {
                 }
             }
         }
-        System.out.println("----------------------");
-        System.out.println("Attachment Report Starts");
+        LOGGER.debug("----------------------");
+        LOGGER.debug("Attachment Report Starts");
+        String title = pageResult.getTitle();
         if (content != null) {
-            System.out.printf("PageTitle: %s has total: %s attachments\n", pageResult.getTitle(), content.getResults().size());
+            LOGGER.debug("PageTitle: {} has total: {} attachments\n", title, content.getResults().size());
         }
-        System.out.printf("Out of which %d are Unused. Names: %s\n", obsoleteAttachmentNames.size(), obsoleteAttachmentNames);
-        System.out.printf("And %d Valid. Names: %s\n", validAttachments.size(), validAttachments);
-        System.out.println("Attachment Report Ends");
-        System.out.println("----------------------");
+        int numOfUnusedAttachments = obsoleteAttachmentNames.size();
+        LOGGER.debug("Out of which {} are Unused. Names: {}\n", numOfUnusedAttachments, obsoleteAttachmentNames);
+        if (numOfUnusedAttachments > 0) {
+            unusedAttachmentsMap.put(title, obsoleteAttachmentNames);
+            LOGGER.info("Page: " + title + " has following unused attachments:");
+            // File name with indentation
+            unusedAttachmentsMap.get(title).forEach(t -> LOGGER.info("                            "+t));
+
+        }
+        LOGGER.debug("And {} Valid. Names: {}\n", validAttachments.size(), validAttachments);
+        LOGGER.debug("Attachment Report Ends");
+        LOGGER.debug("----------------------");
 
         return obsoleteAttachments;
     }
@@ -134,12 +155,16 @@ public class ConfluenceReadApi {
     private List<String> getUnusedAttachmentForChildPage(String authToken, String link) {
         List<String> unusedAttachments = new ArrayList<>();
         ContentApiResponse contentApiResponse = getChildPages(authToken, link);
-        System.out.printf("Child Content Api Response Received for url: %s\n", link);
+        LOGGER.debug("Child Content Api Response Received for url: {}\n", link);
 
         if (contentApiResponse != null) {
             for (PageResult result : contentApiResponse.getResults()) {
                 List<String> nextLinks = getNextLinks(result);
-                System.out.printf("Result is of Type: %s with title: %s. Next Links: %s\n", result.getType(), result.getTitle(), nextLinks);
+
+                if (result.getType().equalsIgnoreCase("page")) {
+                    pagesRead.add(result.getTitle());
+                    LOGGER.debug("Result is of Type: {} with title: {}. Next Links: {}\n", result.getType(), result.getTitle(), nextLinks);
+                }
 
                 for (String nextLink : nextLinks) {
                     if (nextLink.endsWith("attachment")) {
@@ -147,7 +172,7 @@ public class ConfluenceReadApi {
                         unusedAttachments.addAll(findUnusedAttachments(authToken, result, nextLink));
                     } else if (nextLink.endsWith("page")) {
                         // so this page has children, so lets check them out
-                        System.out.println("Next Child: " + nextLink);
+                        LOGGER.debug("Next Child: " + nextLink);
                         unusedAttachments.addAll(getUnusedAttachmentForChildPage(authToken, nextLink));
                     }
                 }
@@ -155,4 +180,15 @@ public class ConfluenceReadApi {
         }
         return unusedAttachments;
     }
+
+
+    public Set<String> getPagesRead() {
+        return this.pagesRead;
+    }
+
+    public Map<String, List<String>> getUnusedAttachmentsMap() {
+        return unusedAttachmentsMap;
+    }
+
+
 }
